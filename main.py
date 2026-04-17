@@ -17,7 +17,6 @@ app.add_middleware(
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# 📊 Memory
 student_memory = {}
 
 class Message(BaseModel):
@@ -27,26 +26,42 @@ class Message(BaseModel):
     user_id: str = "student1"
 
 
-# 🧠 Prompt
+# 🔥 HINGLISH + FUN PROMPT
 def build_prompt(subject, question, weak_topics):
     return f"""
-You are an expert teacher for Class 8–12, JEE, NEET.
+You are a top JEE/NEET teacher.
 
-Weak topics: {weak_topics}
+Speak in Hinglish (Hindi + English mix).
+Be friendly, energetic and slightly funny 😄
 
-Answer in format:
-1. Concept
-2. Formula
-3. Step-by-step solution
-4. Final answer
+Style:
+- Use phrases like "arre bhai", "samjha kya?", "easy hai"
+- Keep tone motivating
+- Don't overdo jokes
 
-Use LaTeX like \\(F=ma\\)
+Format STRICTLY:
+
+### Concept
+Explain simply
+
+### Formula
+Use proper equations
+
+### Step-by-step
+Teach like real teacher
+
+### Final Answer
+Short crisp answer
+
+If question is outside syllabus:
+Say:
+"Arre bhai 😄 yaha sirf padhai hoti hai, ja padhai kar!"
 
 Question: {question}
 """
 
 
-# 🤖 FINAL WORKING GEMINI FUNCTION
+# 🤖 AI FUNCTION
 def ask_ai(prompt, image=None):
 
     if not GEMINI_API_KEY:
@@ -65,18 +80,14 @@ def ask_ai(prompt, image=None):
         })
 
     payload = {
-        "contents": [
-            {
-                "parts": parts
-            }
-        ]
+        "contents": [{"parts": parts}]
     }
 
     try:
         response = requests.post(url, json=payload, timeout=30)
         result = response.json()
 
-        print("GEMINI RESPONSE:", result)
+        print(result)
 
         if "candidates" in result:
             return result["candidates"][0]["content"]["parts"][0]["text"]
@@ -84,13 +95,13 @@ def ask_ai(prompt, image=None):
         if "error" in result:
             return f"⚠️ Gemini Error: {result['error']['message']}"
 
-        return "⚠️ No valid AI response"
+        return "⚠️ No AI response"
 
     except Exception as e:
         return f"⚠️ Server Error: {str(e)}"
 
 
-# 🚀 CHAT API
+# 🚀 CHAT
 @app.post("/chat")
 def chat(msg: Message):
 
@@ -134,12 +145,12 @@ def analytics(user_id: str):
 def study_plan(user_id: str):
 
     if user_id not in student_memory:
-        return {"plan": "Solve some questions first."}
+        return {"plan": "Pehle thoda padh le 😄"}
 
     weak_topics = list(student_memory[user_id].keys())
 
     prompt = f"""
-Create simple 3-day study plan.
+Create a 3-day Hinglish study plan.
 
 Weak topics: {weak_topics}
 """
@@ -151,4 +162,4 @@ Weak topics: {weak_topics}
 
 @app.get("/")
 def home():
-    return {"message": "RUNNING"}
+    return {"message": "E Acad Running 🚀"}
