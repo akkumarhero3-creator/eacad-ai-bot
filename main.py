@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# ✅ CORS
+# ✅ CORS (for Wix)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,13 +15,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🔐 API KEY
+# 🔐 API KEY (Render)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# 🧠 simple analytics
+# 🧠 Analytics (simple)
 analytics_data = {}
 
-# 📩 request model
+# 📩 Request model
 class Message(BaseModel):
     message: str
     subject: str
@@ -29,14 +29,14 @@ class Message(BaseModel):
     history: list = []
 
 
-# 🧠 prompt builder
+# 🧠 PROMPT BUILDER
 def build_prompt(subject, question, history):
 
     rules = """
 You are an expert teacher for Class 8–12, JEE and NEET.
 Explain step-by-step in simple language.
 
-If not study related, reply:
+If NOT study-related, reply EXACTLY:
 "Ye chacha tula samajhta ka nahi 😤 Ja jaaun abhyas kar 📚🔥"
 """
 
@@ -56,38 +56,50 @@ If not study related, reply:
     return f"{rules}\nYou are {teacher}\n\n{history_text}\nQuestion: {question}"
 
 
+# 🤖 UNIVERSAL AI CALL (AUTO MODEL FIX)
+def call_gemini(payload):
+
+    models = [
+        "gemini-1.5-pro",
+        "gemini-1.5-flash",
+        "gemini-pro"
+    ]
+
+    for model in models:
+
+        url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent"
+        params = {"key": GEMINI_API_KEY}
+
+        try:
+            res = requests.post(url, params=params, json=payload)
+            data = res.json()
+
+            print(f"TRYING MODEL: {model}", data)
+
+            if "candidates" in data:
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+
+            elif "error" in data:
+                continue  # try next model
+
+        except:
+            continue
+
+    return "⚠️ All AI models failed. Check API key."
+
+
 # 🤖 TEXT
 def ask_text(prompt):
-
-    url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent"
-    params = {"key": GEMINI_API_KEY}
 
     payload = {
         "contents": [{"parts": [{"text": prompt}]}]
     }
 
-    try:
-        res = requests.post(url, params=params, json=payload)
-        data = res.json()
-
-        if "candidates" in data:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-
-        elif "error" in data:
-            return data["error"]["message"]
-
-        else:
-            return "⚠️ No AI response"
-
-    except Exception as e:
-        return f"⚠️ {str(e)}"
+    return call_gemini(payload)
 
 
 # 🤖 IMAGE
 def ask_image(prompt, img):
-
-    url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent"
-    params = {"key": GEMINI_API_KEY}
 
     payload = {
         "contents": [
@@ -105,21 +117,7 @@ def ask_image(prompt, img):
         ]
     }
 
-    try:
-        res = requests.post(url, params=params, json=payload)
-        data = res.json()
-
-        if "candidates" in data:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-
-        elif "error" in data:
-            return data["error"]["message"]
-
-        else:
-            return "⚠️ Image AI failed"
-
-    except Exception as e:
-        return f"⚠️ {str(e)}"
+    return call_gemini(payload)
 
 
 # 🚀 MAIN CHAT
@@ -133,27 +131,27 @@ def chat(msg: Message):
     else:
         reply = ask_text(prompt)
 
-    # simple analytics (global)
+    # 📊 Analytics
     analytics_data[msg.subject] = analytics_data.get(msg.subject, 0) + 1
 
     return {"reply": reply}
 
 
-# 📊 analytics
+# 📊 ANALYTICS
 @app.get("/analytics")
 def analytics():
     return {"data": analytics_data}
 
 
-# 📅 study plan
+# 📅 STUDY PLAN
 @app.get("/study-plan")
 def study_plan():
     return {
-        "plan": "Study Physics, Chemistry, Maths/Biology daily. Revise weekly."
+        "plan": "Study daily: Physics, Chemistry, Maths/Biology. Revise weekly."
     }
 
 
-# 🏠 home
+# 🏠 HOME
 @app.get("/")
 def home():
-    return {"message": "E Acad Running 🚀"}
+    return {"message": "E Acad Backend Running 🚀"}
