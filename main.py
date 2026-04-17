@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
+# ✅ CORS (important for Wix)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,42 +18,37 @@ app.add_middleware(
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# memory (basic weak topic tracking)
+# 📊 Student analytics memory
 student_memory = {}
 
 class Message(BaseModel):
     message: str
     subject: str
     image: str = None
-    user_id: str = "default"
+    user_id: str = "student1"
 
 
+# 🧠 Prompt
 def build_prompt(subject, question, weak_topics):
-
     return f"""
 You are an expert teacher for Class 8–12, JEE, NEET.
 
-Student weak topics: {weak_topics}
+Weak topics: {weak_topics}
 
-Respond in structured format:
+Answer in format:
+1. Concept
+2. Formula
+3. Step-by-step solution
+4. Final answer
 
-### Concept
-### Formula
-### Step-by-step Solution
-### Final Answer
-
-Rules:
-- Use LaTeX for equations (example: \\(F=ma\\))
-- Explain diagrams clearly if image present
-- Keep explanation simple but exam-level
-
-If irrelevant:
-"Ye chacha tula samajhta ka nahi 😤 Ja jaaun abhyas kar 📚🔥"
+Use simple language.
+Use LaTeX for equations like \\(F=ma\\)
 
 Question: {question}
 """
 
 
+# 🤖 Gemini API
 def ask_ai(prompt, image=None):
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
@@ -84,22 +80,46 @@ def ask_ai(prompt, image=None):
         return str(result)
 
 
+# 🚀 Chat API
 @app.post("/chat")
 def chat(msg: Message):
 
     user = msg.user_id
 
     if user not in student_memory:
-        student_memory[user] = []
+        student_memory[user] = {}
 
-    weak_topics = ", ".join(student_memory[user])
+    text = msg.message.lower()
+
+    topic = "General"
+
+    if "force" in text or "motion" in text:
+        topic = "Mechanics"
+    elif "current" in text or "electric" in text:
+        topic = "Electricity"
+    elif "atom" in text or "mole" in text:
+        topic = "Chemistry"
+    elif "cell" in text or "plant" in text:
+        topic = "Biology"
+
+    student_memory[user][topic] = student_memory[user].get(topic, 0) + 1
+
+    weak_topics = sorted(student_memory[user], key=student_memory[user].get, reverse=True)
 
     prompt = build_prompt(msg.subject, msg.message, weak_topics)
 
     reply = ask_ai(prompt, msg.image)
 
-    # simple weak topic detection
-    if "force" in msg.message.lower():
-        student_memory[user].append("Mechanics")
-
     return {"reply": reply}
+
+
+# 📊 Analytics API
+@app.get("/analytics/{user_id}")
+def analytics(user_id: str):
+    return {"data": student_memory.get(user_id, {})}
+
+
+# 🏠 Home
+@app.get("/")
+def home():
+    return {"message": "E Acad AI Running 🚀"}
