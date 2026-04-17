@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# ✅ CORS
+# ✅ CORS (for Wix)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,13 +15,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🔐 API KEY (from Render)
+# 🔐 Gemini API key from Render
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# 🧠 In-memory storage (simple database)
-student_memory = {}
+# 🧠 Simple in-memory storage
 student_analytics = {}
-
 
 # 📩 Request model
 class Message(BaseModel):
@@ -29,16 +27,17 @@ class Message(BaseModel):
     subject: str
     image: str = None
     history: list = []
+    user: str = "guest"
 
 
-# 🧠 Prompt builder
+# 🧠 Prompt Builder
 def build_prompt(subject, question, history):
 
     rules = """
 You are an expert teacher for Class 8–12, JEE and NEET.
-Explain step-by-step in simple language.
+Explain answers step-by-step in simple language.
 
-If NOT study related, reply:
+If NOT study-related, reply EXACTLY:
 "Ye chacha tula samajhta ka nahi 😤 Ja jaaun abhyas kar 📚🔥"
 """
 
@@ -51,7 +50,7 @@ If NOT study related, reply:
 
     teacher = teacher_map.get(subject, "Teacher")
 
-    # 🧠 Add history context
+    # 🧠 Add memory (last 5 messages)
     history_text = ""
     for h in history[-5:]:
         history_text += f"{h['role']}: {h['text']}\n"
@@ -59,11 +58,10 @@ If NOT study related, reply:
     return f"{rules}\nYou are {teacher}\n\nConversation:\n{history_text}\nQuestion: {question}"
 
 
-# 🤖 Gemini TEXT
+# 🤖 TEXT AI
 def ask_text(prompt):
 
     url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent"
-
     params = {"key": GEMINI_API_KEY}
 
     payload = {
@@ -74,20 +72,25 @@ def ask_text(prompt):
         res = requests.post(url, params=params, json=payload)
         data = res.json()
 
+        print("TEXT DEBUG:", data)
+
         if "candidates" in data:
             return data["candidates"][0]["content"]["parts"][0]["text"]
+
+        elif "error" in data:
+            return f"⚠️ Gemini Error: {data['error']['message']}"
+
         else:
-            return "⚠️ AI error"
+            return "⚠️ AI returned empty response"
 
     except Exception as e:
-        return f"⚠️ {str(e)}"
+        return f"⚠️ Exception: {str(e)}"
 
 
-# 🤖 Gemini IMAGE
+# 🤖 IMAGE AI
 def ask_image(prompt, base64_img):
 
     url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent"
-
     params = {"key": GEMINI_API_KEY}
 
     payload = {
@@ -110,30 +113,38 @@ def ask_image(prompt, base64_img):
         res = requests.post(url, params=params, json=payload)
         data = res.json()
 
+        print("IMAGE DEBUG:", data)
+
         if "candidates" in data:
             return data["candidates"][0]["content"]["parts"][0]["text"]
+
+        elif "error" in data:
+            return f"⚠️ Gemini Error: {data['error']['message']}"
+
         else:
-            return "⚠️ Image AI error"
+            return "⚠️ Image AI returned empty response"
 
     except Exception as e:
-        return f"⚠️ {str(e)}"
+        return f"⚠️ Exception: {str(e)}"
 
 
-# 🚀 MAIN CHAT
+# 🚀 MAIN CHAT API
 @app.post("/chat")
 def chat(msg: Message):
 
     prompt = build_prompt(msg.subject, msg.message, msg.history)
 
-    # 📸 If image present
+    # 📸 If image exists
     if msg.image:
         reply = ask_image(prompt, msg.image)
     else:
         reply = ask_text(prompt)
 
-    # 📊 simple analytics (count messages per subject)
-    student_analytics.setdefault("student1", {})
-    student_analytics["student1"][msg.subject] = student_analytics["student1"].get(msg.subject, 0) + 1
+    # 📊 Analytics per user
+    user = msg.user
+
+    student_analytics.setdefault(user, {})
+    student_analytics[user][msg.subject] = student_analytics[user].get(msg.subject, 0) + 1
 
     return {"reply": reply}
 
@@ -143,16 +154,16 @@ def chat(msg: Message):
 def analytics(student: str):
 
     data = student_analytics.get(student, {
-        "physics": 2,
-        "maths": 1,
-        "chemistry": 1,
+        "physics": 0,
+        "maths": 0,
+        "chemistry": 0,
         "biology": 0
     })
 
     return {"data": data}
 
 
-# 📅 STUDY PLAN
+# 📅 STUDY PLAN API
 @app.get("/study-plan/{student}")
 def study_plan(student: str):
 
@@ -171,7 +182,7 @@ Day 7: Mock Test
     return {"plan": plan}
 
 
-# 🏠 TEST
+# 🏠 HOME
 @app.get("/")
 def home():
     return {"message": "E Acad AI Backend Running 🚀"}
