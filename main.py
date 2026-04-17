@@ -54,7 +54,7 @@ If the question is NOT related to studies, reply EXACTLY:
 def ask_ai(prompt):
 
     if not GEMINI_API_KEY:
-        return "⚠️ API Key not found. Please check server setup."
+        return "⚠️ API Key not found. Check Render environment variable."
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
 
@@ -72,10 +72,22 @@ def ask_ai(prompt):
         response = requests.post(url, json=payload)
         result = response.json()
 
-        return result["candidates"][0]["content"]["parts"][0]["text"]
+        # 🔍 DEBUG: print full response (optional)
+        print(result)
+
+        # ✅ Handle success
+        if "candidates" in result:
+            return result["candidates"][0]["content"]["parts"][0]["text"]
+
+        # ❌ Handle API error
+        elif "error" in result:
+            return f"⚠️ Gemini Error: {result['error']['message']}"
+
+        else:
+            return "⚠️ Unexpected response from AI"
 
     except Exception as e:
-        return f"⚠️ Error: {str(e)}"
+        return f"⚠️ Exception: {str(e)}"
 
 
 # 🚀 Main API
