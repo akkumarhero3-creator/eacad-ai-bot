@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import requests
 import os
-
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
@@ -16,148 +15,163 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 🔐 API KEY (from Render)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# 📊 Memory
+# 🧠 In-memory storage (simple database)
 student_memory = {}
+student_analytics = {}
 
+
+# 📩 Request model
 class Message(BaseModel):
     message: str
     subject: str
     image: str = None
-    user_id: str = "student1"
+    history: list = []
 
 
 # 🧠 Prompt builder
-def build_prompt(subject, question, weak_topics):
-    return f"""
-You are an expert teacher for Class 8–12, JEE, NEET.
+def build_prompt(subject, question, history):
 
-Weak topics: {weak_topics}
+    rules = """
+You are an expert teacher for Class 8–12, JEE and NEET.
+Explain step-by-step in simple language.
 
-Answer in format:
-1. Concept
-2. Formula
-3. Step-by-step solution
-4. Final answer
-
-Use LaTeX where needed.
-
-Question: {question}
+If NOT study related, reply:
+"Ye chacha tula samajhta ka nahi 😤 Ja jaaun abhyas kar 📚🔥"
 """
 
+    teacher_map = {
+        "physics": "Avinash 2.0 (Physics expert)",
+        "maths": "Dharmentra 2.0 (Maths expert)",
+        "chemistry": "Abhishek 2.0 (Chemistry expert)",
+        "biology": "Ashutosh 2.0 (Biology expert)"
+    }
 
-# 🤖 AI
-def ask_ai(prompt, image=None):
+    teacher = teacher_map.get(subject, "Teacher")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
+    # 🧠 Add history context
+    history_text = ""
+    for h in history[-5:]:
+        history_text += f"{h['role']}: {h['text']}\n"
 
-    parts = [{"text": prompt}]
+    return f"{rules}\nYou are {teacher}\n\nConversation:\n{history_text}\nQuestion: {question}"
 
-    if image:
-        parts.append({
-            "inline_data": {
-                "mime_type": "image/jpeg",
-                "data": image
-            }
-        })
+
+# 🤖 Gemini TEXT
+def ask_text(prompt):
+
+    url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent"
+
+    params = {"key": GEMINI_API_KEY}
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+
+    try:
+        res = requests.post(url, params=params, json=payload)
+        data = res.json()
+
+        if "candidates" in data:
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            return "⚠️ AI error"
+
+    except Exception as e:
+        return f"⚠️ {str(e)}"
+
+
+# 🤖 Gemini IMAGE
+def ask_image(prompt, base64_img):
+
+    url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent"
+
+    params = {"key": GEMINI_API_KEY}
 
     payload = {
         "contents": [
             {
-                "parts": parts
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/png",
+                            "data": base64_img
+                        }
+                    }
+                ]
             }
         ]
     }
 
-    response = requests.post(url, json=payload)
-    result = response.json()
+    try:
+        res = requests.post(url, params=params, json=payload)
+        data = res.json()
 
-    if "candidates" in result:
-        try:
-            return result["candidates"][0]["content"]["parts"][0]["text"]
-        except:
-            return "⚠️ Error reading AI response"
+        if "candidates" in data:
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            return "⚠️ Image AI error"
 
-    elif "error" in result:
-        return f"⚠️ Gemini Error: {result['error']['message']}"
-
-    else:
-        return "⚠️ Unexpected AI response"
+    except Exception as e:
+        return f"⚠️ {str(e)}"
 
 
-# 🚀 Chat API
+# 🚀 MAIN CHAT
 @app.post("/chat")
 def chat(msg: Message):
 
-    user = msg.user_id
+    prompt = build_prompt(msg.subject, msg.message, msg.history)
 
-    if user not in student_memory:
-        student_memory[user] = {}
+    # 📸 If image present
+    if msg.image:
+        reply = ask_image(prompt, msg.image)
+    else:
+        reply = ask_text(prompt)
 
-    text = msg.message.lower()
-
-    topic = "General"
-
-    if "force" in text or "motion" in text:
-        topic = "Mechanics"
-    elif "current" in text or "electric" in text:
-        topic = "Electricity"
-    elif "atom" in text or "mole" in text:
-        topic = "Chemistry"
-    elif "cell" in text or "plant" in text:
-        topic = "Biology"
-
-    student_memory[user][topic] = student_memory[user].get(topic, 0) + 1
-
-    weak_topics = sorted(student_memory[user], key=student_memory[user].get, reverse=True)
-
-    prompt = build_prompt(msg.subject, msg.message, weak_topics)
-
-    reply = ask_ai(prompt, msg.image)
+    # 📊 simple analytics (count messages per subject)
+    student_analytics.setdefault("student1", {})
+    student_analytics["student1"][msg.subject] = student_analytics["student1"].get(msg.subject, 0) + 1
 
     return {"reply": reply}
 
 
-# 📊 Analytics
-@app.get("/analytics/{user_id}")
-def analytics(user_id: str):
-    return {"data": student_memory.get(user_id, {})}
+# 📊 ANALYTICS API
+@app.get("/analytics/{student}")
+def analytics(student: str):
+
+    data = student_analytics.get(student, {
+        "physics": 2,
+        "maths": 1,
+        "chemistry": 1,
+        "biology": 0
+    })
+
+    return {"data": data}
 
 
-# 📅 Study Planner
-@app.get("/study-plan/{user_id}")
-def study_plan(user_id: str):
+# 📅 STUDY PLAN
+@app.get("/study-plan/{student}")
+def study_plan(student: str):
 
-    if user_id not in student_memory:
-        return {"plan": "No data available yet. Ask some doubts first."}
+    plan = """
+📅 Weekly Study Plan:
 
-    weak_topics = sorted(student_memory[user_id], key=student_memory[user_id].get, reverse=True)
-
-    prompt = f"""
-Create a 3-day study plan for a JEE/NEET student.
-
-Weak topics: {weak_topics}
-
-Format:
-
-Day 1:
-- Topic
-- Practice
-- Revision
-
-Day 2:
-...
-
-Day 3:
-...
+Day 1: Physics - Laws of Motion  
+Day 2: Chemistry - Mole Concept  
+Day 3: Maths - Functions  
+Day 4: Biology - Cell  
+Day 5: Revision  
+Day 6: Practice Questions  
+Day 7: Mock Test  
 """
-
-    plan = ask_ai(prompt)
 
     return {"plan": plan}
 
 
+# 🏠 TEST
 @app.get("/")
 def home():
-    return {"message": "E Acad AI Running 🚀"}
+    return {"message": "E Acad AI Backend Running 🚀"}
