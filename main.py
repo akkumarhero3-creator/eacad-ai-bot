@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# ✅ CORS (for Wix)
+# ✅ CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,143 +15,140 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🔐 API KEY (Render)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# 🧠 Analytics (simple)
-analytics_data = {}
+# 📊 Memory
+student_memory = {}
 
-# 📩 Request model
 class Message(BaseModel):
     message: str
     subject: str
     image: str = None
-    history: list = []
+    user_id: str = "student1"
 
 
-# 🧠 PROMPT BUILDER
-def build_prompt(subject, question, history):
+# 🧠 Prompt
+def build_prompt(subject, question, weak_topics):
+    return f"""
+You are an expert teacher for Class 8–12, JEE, NEET.
 
-    rules = """
-You are an expert teacher for Class 8–12, JEE and NEET.
-Explain step-by-step in simple language.
+Weak topics: {weak_topics}
 
-If NOT study-related, reply EXACTLY:
-"Ye chacha tula samajhta ka nahi 😤 Ja jaaun abhyas kar 📚🔥"
+Answer in format:
+1. Concept
+2. Formula
+3. Step-by-step solution
+4. Final answer
+
+Use LaTeX like \\(F=ma\\)
+
+Question: {question}
 """
 
-    teachers = {
-        "physics": "Avinash 2.0 Physics teacher",
-        "maths": "Dharmentra 2.0 Maths teacher",
-        "chemistry": "Abhishek 2.0 Chemistry teacher",
-        "biology": "Ashutosh 2.0 Biology teacher"
-    }
 
-    teacher = teachers.get(subject, "Teacher")
+# 🤖 FINAL WORKING GEMINI FUNCTION
+def ask_ai(prompt, image=None):
 
-    history_text = ""
-    for h in history[-5:]:
-        history_text += f"{h['role']}: {h['text']}\n"
+    if not GEMINI_API_KEY:
+        return "⚠️ API key missing"
 
-    return f"{rules}\nYou are {teacher}\n\n{history_text}\nQuestion: {question}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
 
+    parts = [{"text": prompt}]
 
-# 🤖 UNIVERSAL AI CALL (AUTO MODEL FIX)
-def call_gemini(payload):
-
-    models = [
-        "gemini-1.5-pro",
-        "gemini-1.5-flash",
-        "gemini-pro"
-    ]
-
-    for model in models:
-
-        url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent"
-        params = {"key": GEMINI_API_KEY}
-
-        try:
-            res = requests.post(url, params=params, json=payload)
-            data = res.json()
-
-            print(f"TRYING MODEL: {model}", data)
-
-            if "candidates" in data:
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-
-            elif "error" in data:
-                continue  # try next model
-
-        except:
-            continue
-
-    return "⚠️ All AI models failed. Check API key."
-
-
-# 🤖 TEXT
-def ask_text(prompt):
-
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}]
-    }
-
-    return call_gemini(payload)
-
-
-# 🤖 IMAGE
-def ask_image(prompt, img):
+    if image:
+        parts.append({
+            "inline_data": {
+                "mime_type": "image/jpeg",
+                "data": image
+            }
+        })
 
     payload = {
         "contents": [
             {
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/png",
-                            "data": img
-                        }
-                    }
-                ]
+                "parts": parts
             }
         ]
     }
 
-    return call_gemini(payload)
+    try:
+        response = requests.post(url, json=payload, timeout=30)
+        result = response.json()
+
+        print("GEMINI RESPONSE:", result)
+
+        if "candidates" in result:
+            return result["candidates"][0]["content"]["parts"][0]["text"]
+
+        if "error" in result:
+            return f"⚠️ Gemini Error: {result['error']['message']}"
+
+        return "⚠️ No valid AI response"
+
+    except Exception as e:
+        return f"⚠️ Server Error: {str(e)}"
 
 
-# 🚀 MAIN CHAT
+# 🚀 CHAT API
 @app.post("/chat")
 def chat(msg: Message):
 
-    prompt = build_prompt(msg.subject, msg.message, msg.history)
+    user = msg.user_id
 
-    if msg.image:
-        reply = ask_image(prompt, msg.image)
-    else:
-        reply = ask_text(prompt)
+    if user not in student_memory:
+        student_memory[user] = {}
 
-    # 📊 Analytics
-    analytics_data[msg.subject] = analytics_data.get(msg.subject, 0) + 1
+    text = msg.message.lower()
+
+    topic = "General"
+
+    if "force" in text or "motion" in text:
+        topic = "Mechanics"
+    elif "current" in text:
+        topic = "Electricity"
+    elif "atom" in text:
+        topic = "Chemistry"
+    elif "cell" in text:
+        topic = "Biology"
+
+    student_memory[user][topic] = student_memory[user].get(topic, 0) + 1
+
+    weak_topics = sorted(student_memory[user], key=student_memory[user].get, reverse=True)
+
+    prompt = build_prompt(msg.subject, msg.message, weak_topics)
+
+    reply = ask_ai(prompt, msg.image)
 
     return {"reply": reply}
 
 
 # 📊 ANALYTICS
-@app.get("/analytics")
-def analytics():
-    return {"data": analytics_data}
+@app.get("/analytics/{user_id}")
+def analytics(user_id: str):
+    return {"data": student_memory.get(user_id, {})}
 
 
 # 📅 STUDY PLAN
-@app.get("/study-plan")
-def study_plan():
-    return {
-        "plan": "Study daily: Physics, Chemistry, Maths/Biology. Revise weekly."
-    }
+@app.get("/study-plan/{user_id}")
+def study_plan(user_id: str):
+
+    if user_id not in student_memory:
+        return {"plan": "Solve some questions first."}
+
+    weak_topics = list(student_memory[user_id].keys())
+
+    prompt = f"""
+Create simple 3-day study plan.
+
+Weak topics: {weak_topics}
+"""
+
+    plan = ask_ai(prompt)
+
+    return {"plan": plan}
 
 
-# 🏠 HOME
 @app.get("/")
 def home():
-    return {"message": "E Acad Backend Running 🚀"}
+    return {"message": "RUNNING"}
