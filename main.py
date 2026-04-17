@@ -56,19 +56,12 @@ def ask_ai(prompt):
     if not GEMINI_API_KEY:
         return "⚠️ API Key not found."
 
-    url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.0-pro:generateContent"
-
-    headers = {
-        "Content-Type": "application/json"
-    }
-
-    params = {
-        "key": GEMINI_API_KEY
-    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
 
     payload = {
         "contents": [
             {
+                "role": "user",
                 "parts": [
                     {"text": prompt}
                 ]
@@ -77,7 +70,7 @@ def ask_ai(prompt):
     }
 
     try:
-        response = requests.post(url, headers=headers, params=params, json=payload)
+        response = requests.post(url, json=payload)
         result = response.json()
 
         print(result)
@@ -89,7 +82,7 @@ def ask_ai(prompt):
             return f"⚠️ Gemini Error: {result['error']['message']}"
 
         else:
-            return "⚠️ Unexpected response"
+            return str(result)
 
     except Exception as e:
         return f"⚠️ Exception: {str(e)}"
