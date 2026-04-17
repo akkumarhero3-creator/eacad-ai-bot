@@ -53,39 +53,16 @@ If the question is NOT related to studies, reply EXACTLY:
 # 🤖 Gemini API Call (latest model)
 def ask_ai(prompt):
 
-    if not GEMINI_API_KEY:
-        return "⚠️ API Key not found."
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-
-    payload = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {"text": prompt}
-                ]
-            }
-        ]
-    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
 
     try:
-        response = requests.post(url, json=payload)
+        response = requests.get(url)
         result = response.json()
 
-        print(result)
-
-        if "candidates" in result:
-            return result["candidates"][0]["content"]["parts"][0]["text"]
-
-        elif "error" in result:
-            return f"⚠️ Gemini Error: {result['error']['message']}"
-
-        else:
-            return str(result)
+        return str(result)
 
     except Exception as e:
-        return f"⚠️ Exception: {str(e)}"
+        return f"Error: {str(e)}"
 
 # 🚀 Main API
 @app.post("/chat")
