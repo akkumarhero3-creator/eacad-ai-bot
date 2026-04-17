@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# ✅ CORS (important for Wix)
+# ✅ CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,7 +18,7 @@ app.add_middleware(
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# 📊 Student analytics memory
+# 📊 Memory
 student_memory = {}
 
 class Message(BaseModel):
@@ -28,7 +28,7 @@ class Message(BaseModel):
     user_id: str = "student1"
 
 
-# 🧠 Prompt
+# 🧠 Prompt builder
 def build_prompt(subject, question, weak_topics):
     return f"""
 You are an expert teacher for Class 8–12, JEE, NEET.
@@ -41,14 +41,13 @@ Answer in format:
 3. Step-by-step solution
 4. Final answer
 
-Use simple language.
-Use LaTeX for equations like \\(F=ma\\)
+Use LaTeX where needed.
 
 Question: {question}
 """
 
 
-# 🤖 Gemini API
+# 🤖 AI
 def ask_ai(prompt, image=None):
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
@@ -75,9 +74,16 @@ def ask_ai(prompt, image=None):
     result = response.json()
 
     if "candidates" in result:
-        return result["candidates"][0]["content"]["parts"][0]["text"]
+        try:
+            return result["candidates"][0]["content"]["parts"][0]["text"]
+        except:
+            return "⚠️ Error reading AI response"
+
+    elif "error" in result:
+        return f"⚠️ Gemini Error: {result['error']['message']}"
+
     else:
-        return str(result)
+        return "⚠️ Unexpected AI response"
 
 
 # 🚀 Chat API
@@ -113,13 +119,45 @@ def chat(msg: Message):
     return {"reply": reply}
 
 
-# 📊 Analytics API
+# 📊 Analytics
 @app.get("/analytics/{user_id}")
 def analytics(user_id: str):
     return {"data": student_memory.get(user_id, {})}
 
 
-# 🏠 Home
+# 📅 Study Planner
+@app.get("/study-plan/{user_id}")
+def study_plan(user_id: str):
+
+    if user_id not in student_memory:
+        return {"plan": "No data available yet. Ask some doubts first."}
+
+    weak_topics = sorted(student_memory[user_id], key=student_memory[user_id].get, reverse=True)
+
+    prompt = f"""
+Create a 3-day study plan for a JEE/NEET student.
+
+Weak topics: {weak_topics}
+
+Format:
+
+Day 1:
+- Topic
+- Practice
+- Revision
+
+Day 2:
+...
+
+Day 3:
+...
+"""
+
+    plan = ask_ai(prompt)
+
+    return {"plan": plan}
+
+
 @app.get("/")
 def home():
     return {"message": "E Acad AI Running 🚀"}
