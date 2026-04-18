@@ -245,7 +245,7 @@ async def chat(
     global processing
 
     if is_abusive(message):
-        return {"reply": "Language sudhar beta 😄", "difficulty": "easy"}
+        return {"reply": "Language sudhar beta nahito gabbar aayega to teri sari kundali kholke samne layega😄", "difficulty": "easy"}
 
     img_base64 = None
 
