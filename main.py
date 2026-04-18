@@ -17,7 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🔥 MULTIPLE API KEYS (10 KEYS)
+# 🔥 MULTIPLE API KEYS (10)
 API_KEYS = [
     os.getenv("GEMINI_KEY_1"),
     os.getenv("GEMINI_KEY_2"),
@@ -31,12 +31,17 @@ API_KEYS = [
     os.getenv("GEMINI_KEY_10"),
 ]
 
-# 🧠 MEMORY + CACHE
+# 🧠 MEMORY
 student_memory = {}
 cache = {}
 last_request = {}
 
-# 📩 MODEL
+# 🔥 MODEL CACHE
+AVAILABLE_MODELS = []
+LAST_MODEL_FETCH = 0
+
+
+# 📩 REQUEST MODEL
 class Message(BaseModel):
     message: str
     subject: str
@@ -44,7 +49,7 @@ class Message(BaseModel):
     user_id: str = "student1"
 
 
-# 🚫 RATE LIMIT (ANTI SPAM)
+# 🚫 RATE LIMIT
 def allow_request(user_id):
     now = time.time()
 
@@ -56,13 +61,49 @@ def allow_request(user_id):
     return True
 
 
+# 🔥 FETCH MODELS AUTOMATICALLY
+def fetch_models(api_key):
+    global AVAILABLE_MODELS, LAST_MODEL_FETCH
+
+    if time.time() - LAST_MODEL_FETCH < 3600 and AVAILABLE_MODELS:
+        return AVAILABLE_MODELS
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+
+    try:
+        response = requests.get(url, timeout=10)
+        data = response.json()
+
+        models = []
+
+        for m in data.get("models", []):
+            name = m.get("name", "")
+
+            if "generateContent" in str(m):
+                models.append(name.replace("models/", ""))
+
+        # prioritize flash models
+        models.sort(key=lambda x: "flash" not in x)
+
+        AVAILABLE_MODELS = models
+        LAST_MODEL_FETCH = time.time()
+
+        print("MODELS:", models)
+
+        return models
+
+    except Exception as e:
+        print("Model fetch error:", e)
+        return ["gemini-1.5-flash-latest"]
+
+
 # 🔥 PROMPT
 def build_prompt(subject, question, weak_topics):
     return f"""
 You are a top JEE/NEET teacher.
 
 Speak in Hinglish (Hindi + English mix).
-Be friendly and motivating 😄
+Be friendly, motivating and slightly funny 😄
 
 Format STRICTLY:
 
@@ -79,60 +120,70 @@ Teach clearly
 Short crisp answer
 
 If outside syllabus:
-"Arre bhai out of syllabus hai ye, 😄 yaha sirf JEE NEET Ki padhai hoti hai!"
+"Arre bhai 😄 yaha sirf padhai hoti hai!"
 
 Question: {question}
 """
 
 
-# 🤖 AI FUNCTION (MULTI-KEY ROTATION)
+# 🤖 AI FUNCTION (AUTO MODEL + KEY ROTATION)
 def ask_ai(prompt, image=None):
 
     keys = [k for k in API_KEYS if k]
-    random.shuffle(keys)  # 🔥 load balance
+    random.shuffle(keys)
 
     for key in keys:
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
+        models = fetch_models(key)
 
-        parts = [{"text": prompt}]
+        for model in models[:3]:  # try best 3
 
-        if image:
-            parts.append({
-                "inline_data": {
-                    "mime_type": "image/jpeg",
-                    "data": image
-                }
-            })
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
 
-        payload = {
-            "contents": [{"parts": parts}]
-        }
+            parts = [{"text": prompt}]
 
-        try:
-            response = requests.post(url, json=payload, timeout=20)
-            result = response.json()
+            if image:
+                parts.append({
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": image
+                    }
+                })
 
-            print("KEY USED:", key[:6], result)
+            payload = {
+                "contents": [{"parts": parts}]
+            }
 
-            # ✅ SUCCESS
-            if "candidates" in result:
-                return result["candidates"][0]["content"]["parts"][0]["text"]
+            try:
+                response = requests.post(url, json=payload, timeout=20)
+                result = response.json()
 
-            # ⚠️ HANDLE ERRORS
-            if "error" in result:
-                msg = result["error"]["message"].lower()
+                print(f"KEY:{key[:6]} MODEL:{model}")
 
-                if "quota" in msg or "limit" in msg:
-                    continue  # 🔄 try next key
+                # ✅ SUCCESS
+                if "candidates" in result:
+                    return result["candidates"][0]["content"]["parts"][0]["text"]
 
-                return f"⚠️ {result['error']['message']}"
+                # ⚠️ ERROR HANDLING
+                if "error" in result:
+                    msg = result["error"]["message"].lower()
 
-        except Exception as e:
-            print("Error:", e)
-            continue
+                    if "quota" in msg or "limit" in msg:
+                        continue
 
-    return "⚠️ Sab AI teachers busy hai 😄 thode time baad try kar"
+                    if "not found" in msg:
+                        continue
+
+                    if "unsupported" in msg:
+                        continue
+
+                    return f"⚠️ {result['error']['message']}"
+
+            except Exception as e:
+                print("Error:", e)
+                continue
+
+    return "⚠️ Sab AI teachers busy hai 😄 thoda baad try kar"
 
 
 # 🚀 CHAT
@@ -145,7 +196,7 @@ def chat(msg: Message):
     if not allow_request(user):
         return {"reply": "⏳ Arre bhai 😄 thoda ruk 2 sec!"}
 
-    # 📦 CACHE CHECK
+    # 📦 CACHE
     cache_key = f"{msg.subject}:{msg.message}"
 
     if cache_key in cache:
@@ -178,7 +229,7 @@ def chat(msg: Message):
     # 🤖 AI CALL
     reply = ask_ai(prompt, msg.image)
 
-    # 💾 SAVE CACHE
+    # 💾 CACHE SAVE
     cache[cache_key] = reply
 
     return {"reply": reply}
