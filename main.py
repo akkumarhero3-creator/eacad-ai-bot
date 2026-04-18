@@ -176,7 +176,7 @@ def ask_openai(prompt):
     key = os.getenv("OPENAI_API_KEY")
 
     if not key:
-        return "⚠️ Sab AI busy hai 😄"
+        return "⚠️ Sab AI Teachers busy hai beta 😄"
 
     url = "https://api.openai.com/v1/chat/completions"
 
@@ -194,13 +194,13 @@ def ask_openai(prompt):
         r = requests.post(url, headers=headers, json=payload, timeout=20).json()
         return r["choices"][0]["message"]["content"]
     except:
-        return "⚠️ All AI systems busy 😄"
+        return "⚠️ All AI Teachers busy 😄"
 
 # ⚙️ PROCESS ENGINE
 def process(msg):
 
     if not allow(msg.user_id):
-        return "⏳ Arre bhai 😄 thoda ruk!"
+        return "⏳ Arre beta 😄 thoda ruk!"
 
     cache_key = f"{msg.subject}:{msg.message}"
 
@@ -225,12 +225,12 @@ def chat(msg: Message):
 
     # 🚫 abuse filter
     if is_abusive(msg.message):
-        return {"reply": "Language sudhar bhai 😄", "difficulty": "easy"}
+        return {"reply": "Language sudhar beta, varna muje bhi bahut kuch aata hai aur teri puri kundali nikalkar Mere master E Acad ko bhej sakta hu 😄", "difficulty": "easy"}
 
     queue.append(msg)
 
     if processing:
-        return {"reply": "⏳ Queue mein hai bhai 😄 thoda wait kar", "difficulty": "easy"}
+        return {"reply": "⏳ Queue mein hai beta tu 😄 thoda wait kar", "difficulty": "easy"}
 
     processing = True
 
