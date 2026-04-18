@@ -15,6 +15,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def check_all_keys():
+
+    results = []
+
+    for i, key in enumerate(API_KEYS, start=1):
+
+        if not key:
+            results.append((i, "❌ Missing"))
+            continue
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
+
+        try:
+            res = requests.get(url, timeout=10)
+            data = res.json()
+
+            if "models" in data:
+                results.append((i, "✅ Working"))
+
+            elif "error" in data:
+                msg = data["error"]["message"]
+
+                if "quota" in msg.lower():
+                    results.append((i, "⚠️ Quota exceeded"))
+                else:
+                    results.append((i, f"❌ Error: {msg}"))
+
+            else:
+                results.append((i, "❌ Unknown issue"))
+
+        except Exception as e:
+            results.append((i, f"❌ Failed: {str(e)}"))
+
+    return results
+
 # 🔑 API KEYS
 API_KEYS = [os.getenv(f"GEMINI_KEY_{i}") for i in range(1,11)]
 
