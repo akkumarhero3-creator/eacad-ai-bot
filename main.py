@@ -4,6 +4,8 @@ import requests, os, random, time, base64
 from fastapi.middleware.cors import CORSMiddleware
 from collections import deque
 
+print("🚀 APP STARTING...")
+
 app = FastAPI()
 
 # ✅ CORS
@@ -15,8 +17,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🔑 KEYS
+# 🔑 KEYS (SAFE)
 API_KEYS = [os.getenv(f"GEMINI_KEY_{i}") for i in range(1,11)]
+API_KEYS = [k for k in API_KEYS if k]
+
+if not API_KEYS:
+    print("❌ WARNING: No GEMINI API KEYS FOUND")
 
 # 🧠 MEMORY + CACHE
 student_memory = {}
@@ -49,11 +55,11 @@ def allow(user):
 # 🚫 ABUSE
 def is_abusive(text):
     bad_words = ["idiot","stupid","fuck","shit","madarchod","chutiya","pagal"]
-    return any(word in text.lower() for word in bad_words)
+    return any(word in (text or "").lower() for word in bad_words)
 
 # 🎯 DIFFICULTY
 def detect_difficulty(q):
-    if len(q) < 20:
+    if len(q or "") < 20:
         return "easy"
     elif len(q) < 60:
         return "medium"
@@ -86,7 +92,7 @@ def fetch_models(key):
     except:
         return ["gemini-1.5-flash-latest"]
 
-# 🧠 PROMPT (ADAPTIVE + EXAM TRICKS)
+# 🧠 PROMPT
 def build_prompt(q, level="medium"):
     return f"""
 You are a top JEE/NEET teacher (PW / Allen level).
@@ -94,21 +100,6 @@ You are a top JEE/NEET teacher (PW / Allen level).
 Speak in Hinglish.
 
 Student Level: {level}
-
-----------------------------------------
-
-If level = weak:
-- Explain clearly with intuition
-- No step skipping
-
-If level = medium:
-- Balanced explanation
-
-If level = strong:
-- Focus on shortcuts
-- Be fast
-
-----------------------------------------
 
 Format STRICTLY:
 
@@ -127,8 +118,6 @@ Final result with unit
 ### Exam Trick
 Shortcut or quick method
 
-----------------------------------------
-
 If image:
 - Read handwritten
 - Understand diagram
@@ -137,7 +126,6 @@ If image:
 Rules:
 - Use clean LaTeX like $F = ma$
 - Avoid \\vec, \\text
-- No markdown symbols
 
 Question: {q}
 """
@@ -175,22 +163,12 @@ def ask_gemini(prompt, image=None):
                     if "candidates" in res:
                         try:
                             return res["candidates"][0]["content"]["parts"][0]["text"]
-                        except:
+                        except Exception as e:
+                            print("Parse error:", e)
                             continue
 
-                    if "error" in res:
-                        msg = res["error"]["message"].lower()
-
-                        if "quota" in msg or "limit" in msg:
-                            break
-
-                        if "overloaded" in msg:
-                            time.sleep(2)
-                            continue
-
-                        break
-
-                except:
+                except Exception as e:
+                    print("Request error:", e)
                     time.sleep(1)
 
     return None
@@ -224,7 +202,9 @@ def ask_openai(prompt):
 # ⚙️ PROCESS
 def process(msg):
 
-    if not allow(msg.user_id):
+    uid = msg.user_id or "student1"
+
+    if not allow(uid):
         return "⏳ Arre beta 😄 thoda ruk!"
 
     cache_key = f"{msg.subject}:{msg.message}:{'img' if msg.image else 'text'}"
@@ -232,15 +212,15 @@ def process(msg):
     if cache_key in cache:
         return cache[cache_key]
 
-    # 🧠 Adaptive level
-    level = student_memory.get(msg.user_id, "medium")
+    # 🧠 Adaptive
+    level = student_memory.get(uid, "medium")
 
-    if len(msg.message) < 15:
+    if len(msg.message or "") < 15:
         level = "weak"
-    elif len(msg.message) > 80:
+    elif len(msg.message or "") > 80:
         level = "strong"
 
-    student_memory[msg.user_id] = level
+    student_memory[uid] = level
 
     prompt = build_prompt(msg.message, level)
 
@@ -264,7 +244,7 @@ async def chat(
     global processing
 
     if is_abusive(message):
-        return {"reply": "Language sudhar beta nahito gabbar teri puri kundali khol dega sabke samne 😄", "difficulty": "easy"}
+        return {"reply": "Language sudhar beta 😄", "difficulty": "easy"}
 
     img_base64 = None
 
@@ -273,10 +253,10 @@ async def chat(
         img_base64 = base64.b64encode(contents).decode("utf-8")
 
     msg = Message(
-        message=message,
+        message=message or "",
         subject=subject,
         image=img_base64,
-        user_id=user_id
+        user_id=user_id or "student1"
     )
 
     queue.append(msg)
