@@ -15,41 +15,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def check_all_keys():
-
-    results = []
-
-    for i, key in enumerate(API_KEYS, start=1):
-
-        if not key:
-            results.append((i, "❌ Missing"))
-            continue
-
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
-
-        try:
-            res = requests.get(url, timeout=10)
-            data = res.json()
-
-            if "models" in data:
-                results.append((i, "✅ Working"))
-
-            elif "error" in data:
-                msg = data["error"]["message"]
-
-                if "quota" in msg.lower():
-                    results.append((i, "⚠️ Quota exceeded"))
-                else:
-                    results.append((i, f"❌ Error: {msg}"))
-
-            else:
-                results.append((i, "❌ Unknown issue"))
-
-        except Exception as e:
-            results.append((i, f"❌ Failed: {str(e)}"))
-
-    return results
-
 # 🔑 API KEYS
 API_KEYS = [os.getenv(f"GEMINI_KEY_{i}") for i in range(1,11)]
 
@@ -66,6 +31,7 @@ LAST_MODEL_FETCH = 0
 queue = deque()
 processing = False
 
+# 📩 REQUEST MODEL
 class Message(BaseModel):
     message: str
     subject: str
@@ -89,18 +55,25 @@ def fetch_models(key):
 
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
-        res = requests.get(url).json()
+        res = requests.get(url, timeout=10).json()
 
-        models = [m["name"].replace("models/","") for m in res.get("models",[])
-                  if "generateContent" in str(m)]
+        models = [
+            m["name"].replace("models/", "")
+            for m in res.get("models", [])
+            if "generateContent" in str(m)
+        ]
 
         models.sort(key=lambda x: "flash" not in x)
 
         AVAILABLE_MODELS = models
         LAST_MODEL_FETCH = time.time()
 
+        print("MODELS:", models)
+
         return models
-    except:
+
+    except Exception as e:
+        print("Model fetch error:", e)
         return ["gemini-1.5-flash-latest"]
 
 # 🧠 PROMPT
@@ -116,13 +89,14 @@ Explain in Hinglish (fun + friendly 😄)
 Question: {q}
 """
 
-# 🤖 GEMINI + RETRY
+# 🤖 GEMINI (KEY + MODEL ROTATION + RETRY)
 def ask_gemini(prompt, image=None):
 
     keys = [k for k in API_KEYS if k]
     random.shuffle(keys)
 
     for key in keys:
+
         models = fetch_models(key)
 
         for model in models[:3]:
@@ -133,14 +107,19 @@ def ask_gemini(prompt, image=None):
 
             if image:
                 parts.append({
-                    "inline_data":{"mime_type":"image/jpeg","data":image}
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": image
+                    }
                 })
 
-            payload = {"contents":[{"parts":parts}]}
+            payload = {"contents": [{"parts": parts}]}
 
-            for _ in range(3):
+            for attempt in range(3):
                 try:
-                    res = requests.post(url,json=payload,timeout=20).json()
+                    res = requests.post(url, json=payload, timeout=20).json()
+
+                    print(f"TRY {attempt} KEY:{key[:6]} MODEL:{model}")
 
                     if "candidates" in res:
                         return res["candidates"][0]["content"]["parts"][0]["text"]
@@ -150,11 +129,16 @@ def ask_gemini(prompt, image=None):
 
                         if "quota" in msg or "limit" in msg:
                             break
+
                         if "overloaded" in msg or "high demand" in msg:
                             time.sleep(2)
                             continue
 
-                except:
+                        if "not found" in msg or "unsupported" in msg:
+                            break
+
+                except Exception as e:
+                    print("Error:", e)
                     time.sleep(1)
 
     return None
@@ -162,34 +146,38 @@ def ask_gemini(prompt, image=None):
 # 🔁 OPENAI FALLBACK
 def ask_openai(prompt):
     key = os.getenv("OPENAI_API_KEY")
+
     if not key:
-        return "⚠️ Server busy 😄"
+        return "⚠️ Sab AI busy hai 😄"
 
     url = "https://api.openai.com/v1/chat/completions"
 
-    headers = {"Authorization": f"Bearer {key}"}
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json"
+    }
 
     payload = {
         "model": "gpt-4o-mini",
-        "messages": [{"role":"user","content":prompt}]
+        "messages": [{"role": "user", "content": prompt}]
     }
 
     try:
-        r = requests.post(url, headers=headers, json=payload).json()
+        r = requests.post(url, headers=headers, json=payload, timeout=20).json()
         return r["choices"][0]["message"]["content"]
     except:
-        return "⚠️ All AI busy 😄"
+        return "⚠️ All AI systems busy 😄"
 
 # ⚙️ PROCESS
 def process(msg):
 
     if not allow(msg.user_id):
-        return "⏳ Slow down bhai 😄"
+        return "⏳ Arre bhai 😄 thoda ruk!"
 
-    key = f"{msg.subject}:{msg.message}"
+    cache_key = f"{msg.subject}:{msg.message}"
 
-    if key in cache:
-        return cache[key]
+    if cache_key in cache:
+        return cache[cache_key]
 
     prompt = prompt_builder(msg.message)
 
@@ -198,11 +186,11 @@ def process(msg):
     if not reply:
         reply = ask_openai(prompt)
 
-    cache[key] = reply
+    cache[cache_key] = reply
 
     return reply
 
-# 🚀 CHAT
+# 🚀 CHAT (QUEUE SYSTEM)
 @app.post("/chat")
 def chat(msg: Message):
     global processing
@@ -210,18 +198,75 @@ def chat(msg: Message):
     queue.append(msg)
 
     if processing:
-        return {"reply":"⏳ Queue mein hai 😄 wait..."}
+        return {"reply": "⏳ Queue mein hai bhai 😄 thoda wait kar"}
 
     processing = True
-    m = queue.popleft()
 
-    reply = process(m)
+    current = queue.popleft()
+    reply = process(current)
 
     processing = False
 
     return {"reply": reply}
 
-# 🏠
+# 🔥 NEW: CHECK ALL KEYS
+def check_all_keys():
+
+    results = []
+
+    for i, key in enumerate(API_KEYS, start=1):
+
+        if not key:
+            results.append({"key": i, "status": "❌ Missing"})
+            continue
+
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
+            res = requests.get(url, timeout=10).json()
+
+            if "models" in res:
+                results.append({"key": i, "status": "✅ Working"})
+
+            elif "error" in res:
+                msg = res["error"]["message"]
+
+                if "quota" in msg.lower():
+                    results.append({"key": i, "status": "⚠️ Quota exceeded"})
+                else:
+                    results.append({"key": i, "status": f"❌ {msg}"})
+
+            else:
+                results.append({"key": i, "status": "❌ Unknown"})
+
+        except Exception as e:
+            results.append({"key": i, "status": f"❌ {str(e)}"})
+
+    return results
+
+# 🔥 ROUTE
+@app.get("/check-keys")
+def check_keys():
+    return {"keys": check_all_keys()}
+
+# 📊 ANALYTICS
+@app.get("/analytics/{user_id}")
+def analytics(user_id: str):
+    return {"data": student_memory.get(user_id, {})}
+
+# 📅 STUDY PLAN
+@app.get("/study-plan/{user_id}")
+def study_plan(user_id: str):
+
+    if user_id not in student_memory:
+        return {"plan": "Pehle padhai kar 😄"}
+
+    topics = list(student_memory[user_id].keys())
+
+    prompt = f"Create 3 day Hinglish study plan for {topics}"
+
+    return {"plan": ask_gemini(prompt)}
+
+# 🏠 HOME
 @app.get("/")
 def home():
-    return {"status":"running 🚀"}
+    return {"status": "E Acad AI Running 🚀"}
