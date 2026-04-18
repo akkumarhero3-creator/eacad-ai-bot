@@ -4,7 +4,7 @@ import requests, os, random, time, base64
 from fastapi.middleware.cors import CORSMiddleware
 from collections import deque
 
-print("🚀 APP STARTING...")
+print("🔥 BACKEND STARTING...")
 
 app = FastAPI()
 
@@ -37,11 +37,11 @@ LAST_MODEL_FETCH = 0
 queue = deque()
 processing = False
 
-# 📩 MODEL
+# 📩 MODEL (SAFE FOR PYDANTIC V2)
 class Message(BaseModel):
-    message: str
+    message: str = ""
     subject: str
-    image: str = None
+    image: str | None = None
     user_id: str = "student1"
 
 # 🚫 RATE LIMIT
@@ -59,7 +59,8 @@ def is_abusive(text):
 
 # 🎯 DIFFICULTY
 def detect_difficulty(q):
-    if len(q or "") < 20:
+    q = q or ""
+    if len(q) < 20:
         return "easy"
     elif len(q) < 60:
         return "medium"
