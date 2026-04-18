@@ -15,10 +15,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🔑 API KEYS
+# 🔑 LOAD MULTIPLE KEYS
 API_KEYS = [os.getenv(f"GEMINI_KEY_{i}") for i in range(1,11)]
 
-# 🧠 MEMORY
+# 🧠 MEMORY + CACHE
 student_memory = {}
 cache = {}
 last_request = {}
@@ -38,7 +38,7 @@ class Message(BaseModel):
     image: str = None
     user_id: str = "student1"
 
-# 🚫 RATE LIMIT
+# 🚫 RATE LIMIT (2 sec/user)
 def allow(user):
     now = time.time()
     if user in last_request and now - last_request[user] < 2:
@@ -51,7 +51,7 @@ def is_abusive(text):
     bad_words = ["idiot","stupid","fuck","shit","madarchod","chutiya","pagal"]
     return any(word in text.lower() for word in bad_words)
 
-# 🎯 DIFFICULTY
+# 🎯 DIFFICULTY DETECTION
 def detect_difficulty(q):
     if len(q) < 20:
         return "easy"
@@ -59,7 +59,7 @@ def detect_difficulty(q):
         return "medium"
     return "hard"
 
-# 🔥 FETCH MODELS
+# 🔥 FETCH AVAILABLE MODELS
 def fetch_models(key):
     global AVAILABLE_MODELS, LAST_MODEL_FETCH
 
@@ -76,34 +76,49 @@ def fetch_models(key):
             if "generateContent" in str(m)
         ]
 
+        # prefer flash models
         models.sort(key=lambda x: "flash" not in x)
 
         AVAILABLE_MODELS = models
         LAST_MODEL_FETCH = time.time()
 
+        print("MODELS:", models)
+
         return models
 
-    except:
+    except Exception as e:
+        print("Model fetch error:", e)
         return ["gemini-1.5-flash-latest"]
 
-# 🧠 PROMPT
+# 🧠 PROMPT BUILDER (CLEAN NOTES STYLE)
 def prompt_builder(q):
     return f"""
-You are a JEE/NEET teacher.
+You are a top JEE/NEET teacher.
 
-Explain in Hinglish (fun + friendly 😄)
+Explain in Hinglish (simple + clean 😄)
 
-Format STRICTLY:
+STRICT FORMAT:
 
-### Concept
-### Formula
-### Step-by-step
-### Final Answer
+# 📘 Concept
+- Clear explanation
+
+# 📐 Formula
+- Use proper formula
+
+# 🧠 Step-by-step
+1. Step
+2. Step
+
+# 🎯 Final Answer
+- Short answer
+
+# ⚡ Exam Tip
+- Smart tip
 
 Question: {q}
 """
 
-# 🤖 GEMINI (ROTATION + RETRY)
+# 🤖 GEMINI ENGINE (ROTATION + RETRY + IMAGE)
 def ask_gemini(prompt, image=None):
 
     keys = [k for k in API_KEYS if k]
@@ -129,9 +144,11 @@ def ask_gemini(prompt, image=None):
 
             payload = {"contents": [{"parts": parts}]}
 
-            for _ in range(3):
+            for attempt in range(3):
                 try:
                     res = requests.post(url, json=payload, timeout=20).json()
+
+                    print(f"TRY {attempt} KEY:{key[:6]} MODEL:{model}")
 
                     if "candidates" in res:
                         return res["candidates"][0]["content"]["parts"][0]["text"]
@@ -142,13 +159,14 @@ def ask_gemini(prompt, image=None):
                         if "quota" in msg or "limit" in msg:
                             break
 
-                        if "overloaded" in msg:
+                        if "overloaded" in msg or "high demand" in msg:
                             time.sleep(2)
                             continue
 
                         break
 
-                except:
+                except Exception as e:
+                    print("Error:", e)
                     time.sleep(1)
 
     return None
@@ -178,7 +196,7 @@ def ask_openai(prompt):
     except:
         return "⚠️ All AI systems busy 😄"
 
-# ⚙️ PROCESS
+# ⚙️ PROCESS ENGINE
 def process(msg):
 
     if not allow(msg.user_id):
@@ -200,19 +218,19 @@ def process(msg):
 
     return reply
 
-# 🚀 CHAT
+# 🚀 CHAT (QUEUE SYSTEM)
 @app.post("/chat")
 def chat(msg: Message):
     global processing
 
-    # 🚫 abuse check
+    # 🚫 abuse filter
     if is_abusive(msg.message):
         return {"reply": "Language sudhar bhai 😄", "difficulty": "easy"}
 
     queue.append(msg)
 
     if processing:
-        return {"reply": "⏳ Queue mein hai bhai 😄", "difficulty": "easy"}
+        return {"reply": "⏳ Queue mein hai bhai 😄 thoda wait kar", "difficulty": "easy"}
 
     processing = True
 
@@ -226,7 +244,7 @@ def chat(msg: Message):
 
     return {"reply": reply, "difficulty": diff}
 
-# 🔥 CHECK KEYS
+# 🔍 CHECK KEYS
 @app.get("/check-keys")
 def check_keys():
 
