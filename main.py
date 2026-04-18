@@ -76,49 +76,49 @@ def fetch_models(key):
             if "generateContent" in str(m)
         ]
 
-        # prefer flash models
         models.sort(key=lambda x: "flash" not in x)
 
         AVAILABLE_MODELS = models
         LAST_MODEL_FETCH = time.time()
 
-        print("MODELS:", models)
-
         return models
 
-    except Exception as e:
-        print("Model fetch error:", e)
+    except:
         return ["gemini-1.5-flash-latest"]
 
-# 🧠 PROMPT BUILDER (CLEAN NOTES STYLE)
-def prompt_builder(q):
+# 🧠 PROMPT (ONLY beta tone change)
+def build_prompt(q):
     return f"""
 You are a top JEE/NEET teacher.
 
-Explain in Hinglish (simple + clean 😄)
+Speak in Hinglish (Hindi + English mix).
+Be friendly, energetic and slightly funny 😄
 
-STRICT FORMAT:
+Style:
+- Use phrases like "arre beta", "samjha kya?", "easy hai"
 
-# 📘 Concept
-- Clear explanation
+Format STRICTLY:
 
-# 📐 Formula
-- Use proper formula
+### Concept
+Explain simply
 
-# 🧠 Step-by-step
-1. Step
-2. Step
+### Formula
+Use proper equations
 
-# 🎯 Final Answer
-- Short answer
+### Step-by-step
+Teach like real teacher
 
-# ⚡ Exam Tip
-- Smart tip
+### Final Answer
+Short crisp answer
+
+If question is outside syllabus:
+Say:
+"Arre beta, out of syllabus mt puch 😄 yaha sirf padhai hoti hai, ja padhai kar!"
 
 Question: {q}
 """
 
-# 🤖 GEMINI ENGINE (ROTATION + RETRY + IMAGE)
+# 🤖 GEMINI ENGINE
 def ask_gemini(prompt, image=None):
 
     keys = [k for k in API_KEYS if k]
@@ -148,8 +148,6 @@ def ask_gemini(prompt, image=None):
                 try:
                     res = requests.post(url, json=payload, timeout=20).json()
 
-                    print(f"TRY {attempt} KEY:{key[:6]} MODEL:{model}")
-
                     if "candidates" in res:
                         return res["candidates"][0]["content"]["parts"][0]["text"]
 
@@ -159,14 +157,13 @@ def ask_gemini(prompt, image=None):
                         if "quota" in msg or "limit" in msg:
                             break
 
-                        if "overloaded" in msg or "high demand" in msg:
+                        if "overloaded" in msg:
                             time.sleep(2)
                             continue
 
                         break
 
-                except Exception as e:
-                    print("Error:", e)
+                except:
                     time.sleep(1)
 
     return None
@@ -178,23 +175,24 @@ def ask_openai(prompt):
     if not key:
         return "⚠️ Sab AI Teachers busy hai beta 😄"
 
-    url = "https://api.openai.com/v1/chat/completions"
-
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": "gpt-4o-mini",
-        "messages": [{"role": "user", "content": prompt}]
-    }
-
     try:
-        r = requests.post(url, headers=headers, json=payload, timeout=20).json()
+        r = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}]
+            },
+            timeout=20
+        ).json()
+
         return r["choices"][0]["message"]["content"]
+
     except:
-        return "⚠️ All AI Teachers busy 😄"
+        return "⚠️ All AI Teachers busy beta 😄"
 
 # ⚙️ PROCESS ENGINE
 def process(msg):
@@ -207,7 +205,7 @@ def process(msg):
     if cache_key in cache:
         return cache[cache_key]
 
-    prompt = prompt_builder(msg.message)
+    prompt = build_prompt(msg.message)
 
     reply = ask_gemini(prompt, msg.image)
 
@@ -223,14 +221,13 @@ def process(msg):
 def chat(msg: Message):
     global processing
 
-    # 🚫 abuse filter
     if is_abusive(msg.message):
-        return {"reply": "Language sudhar beta, varna muje bhi bahut kuch aata hai aur teri puri kundali nikalkar Mere master E Acad ko bhej sakta hu 😄", "difficulty": "easy"}
+        return {"reply": "Language sudhar beta, teri puri kundali nikalkar E Acad masterji ko bhej sakta hu nahito 😄", "difficulty": "easy"}
 
     queue.append(msg)
 
     if processing:
-        return {"reply": "⏳ Queue mein hai beta tu 😄 thoda wait kar", "difficulty": "easy"}
+        return {"reply": "⏳ Queue mein hai beta 😄 thoda wait kar", "difficulty": "easy"}
 
     processing = True
 
@@ -247,30 +244,21 @@ def chat(msg: Message):
 # 🔍 CHECK KEYS
 @app.get("/check-keys")
 def check_keys():
-
     results = []
-
-    for i, key in enumerate(API_KEYS, start=1):
-
+    for i, key in enumerate(API_KEYS, 1):
         if not key:
             results.append({"key": i, "status": "❌ Missing"})
             continue
-
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
-            res = requests.get(url, timeout=10).json()
-
-            if "models" in res:
+            r = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={key}").json()
+            if "models" in r:
                 results.append({"key": i, "status": "✅ Working"})
             else:
                 results.append({"key": i, "status": "⚠️ Issue"})
-
         except Exception as e:
             results.append({"key": i, "status": str(e)})
-
     return {"keys": results}
 
-# 🏠 HOME
 @app.get("/")
 def home():
     return {"status": "E Acad AI Running 🚀"}
