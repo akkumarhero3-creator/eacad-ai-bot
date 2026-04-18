@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from pydantic import BaseModel
+from typing import Optional
 import requests, os, random, time, base64
 from fastapi.middleware.cors import CORSMiddleware
 from collections import deque
@@ -37,11 +38,11 @@ LAST_MODEL_FETCH = 0
 queue = deque()
 processing = False
 
-# 📩 MODEL (SAFE FOR PYDANTIC V2)
+# ✅ FIXED MODEL (IMPORTANT)
 class Message(BaseModel):
     message: str = ""
-    subject: str
-    image: str | None = None
+    subject: str = ""
+    image: Optional[str] = None
     user_id: str = "student1"
 
 # 🚫 RATE LIMIT
@@ -213,7 +214,6 @@ def process(msg):
     if cache_key in cache:
         return cache[cache_key]
 
-    # 🧠 Adaptive
     level = student_memory.get(uid, "medium")
 
     if len(msg.message or "") < 15:
