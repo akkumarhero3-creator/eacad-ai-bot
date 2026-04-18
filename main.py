@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import requests
 import os
+import random
+import time
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
@@ -15,10 +17,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# 🔥 MULTIPLE API KEYS (10 KEYS)
+API_KEYS = [
+    os.getenv("GEMINI_KEY_1"),
+    os.getenv("GEMINI_KEY_2"),
+    os.getenv("GEMINI_KEY_3"),
+    os.getenv("GEMINI_KEY_4"),
+    os.getenv("GEMINI_KEY_5"),
+    os.getenv("GEMINI_KEY_6"),
+    os.getenv("GEMINI_KEY_7"),
+    os.getenv("GEMINI_KEY_8"),
+    os.getenv("GEMINI_KEY_9"),
+    os.getenv("GEMINI_KEY_10"),
+]
 
+# 🧠 MEMORY + CACHE
 student_memory = {}
+cache = {}
+last_request = {}
 
+# 📩 MODEL
 class Message(BaseModel):
     message: str
     subject: str
@@ -26,18 +44,25 @@ class Message(BaseModel):
     user_id: str = "student1"
 
 
-# 🔥 HINGLISH + FUN PROMPT
+# 🚫 RATE LIMIT (ANTI SPAM)
+def allow_request(user_id):
+    now = time.time()
+
+    if user_id in last_request:
+        if now - last_request[user_id] < 2:
+            return False
+
+    last_request[user_id] = now
+    return True
+
+
+# 🔥 PROMPT
 def build_prompt(subject, question, weak_topics):
     return f"""
 You are a top JEE/NEET teacher.
 
 Speak in Hinglish (Hindi + English mix).
-Be friendly, energetic and slightly funny 😄
-
-Style:
-- Use phrases like "arre bhai", "samjha kya?", "easy hai"
-- Keep tone motivating
-- Don't overdo jokes
+Be friendly and motivating 😄
 
 Format STRICTLY:
 
@@ -48,57 +73,66 @@ Explain simply
 Use proper equations
 
 ### Step-by-step
-Teach like real teacher
+Teach clearly
 
 ### Final Answer
 Short crisp answer
 
-If question is outside syllabus:
-Say:
-"Arre bhai 😄 yaha sirf padhai hoti hai, ja padhai kar!"
+If outside syllabus:
+"Arre bhai out of syllabus hai ye, 😄 yaha sirf JEE NEET Ki padhai hoti hai!"
 
 Question: {question}
 """
 
 
-# 🤖 AI FUNCTION
+# 🤖 AI FUNCTION (MULTI-KEY ROTATION)
 def ask_ai(prompt, image=None):
 
-    if not GEMINI_API_KEY:
-        return "⚠️ API key missing"
+    keys = [k for k in API_KEYS if k]
+    random.shuffle(keys)  # 🔥 load balance
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
+    for key in keys:
 
-    parts = [{"text": prompt}]
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
 
-    if image:
-        parts.append({
-            "inline_data": {
-                "mime_type": "image/jpeg",
-                "data": image
-            }
-        })
+        parts = [{"text": prompt}]
 
-    payload = {
-        "contents": [{"parts": parts}]
-    }
+        if image:
+            parts.append({
+                "inline_data": {
+                    "mime_type": "image/jpeg",
+                    "data": image
+                }
+            })
 
-    try:
-        response = requests.post(url, json=payload, timeout=30)
-        result = response.json()
+        payload = {
+            "contents": [{"parts": parts}]
+        }
 
-        print(result)
+        try:
+            response = requests.post(url, json=payload, timeout=20)
+            result = response.json()
 
-        if "candidates" in result:
-            return result["candidates"][0]["content"]["parts"][0]["text"]
+            print("KEY USED:", key[:6], result)
 
-        if "error" in result:
-            return f"⚠️ Gemini Error: {result['error']['message']}"
+            # ✅ SUCCESS
+            if "candidates" in result:
+                return result["candidates"][0]["content"]["parts"][0]["text"]
 
-        return "⚠️ No AI response"
+            # ⚠️ HANDLE ERRORS
+            if "error" in result:
+                msg = result["error"]["message"].lower()
 
-    except Exception as e:
-        return f"⚠️ Server Error: {str(e)}"
+                if "quota" in msg or "limit" in msg:
+                    continue  # 🔄 try next key
+
+                return f"⚠️ {result['error']['message']}"
+
+        except Exception as e:
+            print("Error:", e)
+            continue
+
+    return "⚠️ Sab AI teachers busy hai 😄 thode time baad try kar"
 
 
 # 🚀 CHAT
@@ -107,6 +141,17 @@ def chat(msg: Message):
 
     user = msg.user_id
 
+    # 🚫 RATE LIMIT
+    if not allow_request(user):
+        return {"reply": "⏳ Arre bhai 😄 thoda ruk 2 sec!"}
+
+    # 📦 CACHE CHECK
+    cache_key = f"{msg.subject}:{msg.message}"
+
+    if cache_key in cache:
+        return {"reply": cache[cache_key]}
+
+    # 🧠 USER MEMORY
     if user not in student_memory:
         student_memory[user] = {}
 
@@ -127,9 +172,14 @@ def chat(msg: Message):
 
     weak_topics = sorted(student_memory[user], key=student_memory[user].get, reverse=True)
 
+    # 🧠 PROMPT
     prompt = build_prompt(msg.subject, msg.message, weak_topics)
 
+    # 🤖 AI CALL
     reply = ask_ai(prompt, msg.image)
+
+    # 💾 SAVE CACHE
+    cache[cache_key] = reply
 
     return {"reply": reply}
 
@@ -160,6 +210,7 @@ Weak topics: {weak_topics}
     return {"plan": plan}
 
 
+# 🏠 HOME
 @app.get("/")
 def home():
-    return {"message": "E Acad Running 🚀"}
+    return {"message": "E Acad AI Running 🚀"}
