@@ -15,7 +15,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🔑 LOAD MULTIPLE KEYS
+# 🔑 KEYS
 API_KEYS = [os.getenv(f"GEMINI_KEY_{i}") for i in range(1,11)]
 
 # 🧠 MEMORY + CACHE
@@ -31,14 +31,14 @@ LAST_MODEL_FETCH = 0
 queue = deque()
 processing = False
 
-# 📩 REQUEST MODEL
+# 📩 MODEL
 class Message(BaseModel):
     message: str
     subject: str
     image: str = None
     user_id: str = "student1"
 
-# 🚫 RATE LIMIT (2 sec/user)
+# 🚫 RATE LIMIT
 def allow(user):
     now = time.time()
     if user in last_request and now - last_request[user] < 2:
@@ -46,12 +46,12 @@ def allow(user):
     last_request[user] = now
     return True
 
-# 🚫 ABUSE FILTER
+# 🚫 ABUSE
 def is_abusive(text):
     bad_words = ["idiot","stupid","fuck","shit","madarchod","chutiya","pagal"]
     return any(word in text.lower() for word in bad_words)
 
-# 🎯 DIFFICULTY DETECTION
+# 🎯 DIFFICULTY
 def detect_difficulty(q):
     if len(q) < 20:
         return "easy"
@@ -59,7 +59,7 @@ def detect_difficulty(q):
         return "medium"
     return "hard"
 
-# 🔥 FETCH AVAILABLE MODELS
+# 🔥 FETCH MODELS
 def fetch_models(key):
     global AVAILABLE_MODELS, LAST_MODEL_FETCH
 
@@ -86,66 +86,63 @@ def fetch_models(key):
     except:
         return ["gemini-1.5-flash-latest"]
 
-# 🧠 PROMPT (UPGRADED FOR IMAGE + DIAGRAM UNDERSTANDING)
-def build_prompt(q):
+# 🧠 PROMPT (ADAPTIVE + EXAM TRICKS)
+def build_prompt(q, level="medium"):
     return f"""
-You are a top JEE/NEET teacher.
+You are a top JEE/NEET teacher (PW / Allen level).
 
-Speak in Hinglish (Hindi + English mix).
-Be friendly, energetic and slightly funny 😄
+Speak in Hinglish.
 
-Style:
-- Use phrases like "arre beta", "samjha kya?", "easy hai"
+Student Level: {level}
+
+----------------------------------------
+
+If level = weak:
+- Explain clearly with intuition
+- No step skipping
+
+If level = medium:
+- Balanced explanation
+
+If level = strong:
+- Focus on shortcuts
+- Be fast
+
+----------------------------------------
 
 Format STRICTLY:
 
 ### Concept
-Explain simply
+Explain core idea
 
 ### Formula
-Use proper equations
+Write needed formulas
 
 ### Step-by-step
-Teach like real teacher
+Solve properly
 
 ### Final Answer
-Short crisp answer
+Final result with unit
+
+### Exam Trick
+Shortcut or quick method
 
 ----------------------------------------
 
-If image is provided:
-
-1. Carefully read handwritten text (ignore noise/scribbles)
-2. Convert it into a clear question internally
-3. If diagram is present:
-   - Understand it properly (forces, circuit, rays, graph etc.)
-   - Use it in solving
-   - Explain in words (no drawing)
-
-4. If graph:
-   - Identify slope/intercept/area
-
-5. If physics diagram:
-   - Identify forces/directions/components
-
-6. If circuit:
-   - Identify connections and apply laws
-
-----------------------------------------
+If image:
+- Read handwritten
+- Understand diagram
+- Solve
 
 Rules:
-- DO NOT say "image shows"
-- DO NOT output raw extracted text
-- Solve directly like a teacher
 - Use clean LaTeX like $F = ma$
 - Avoid \\vec, \\text
-
-----------------------------------------
+- No markdown symbols
 
 Question: {q}
 """
 
-# 🤖 GEMINI ENGINE (UNCHANGED LOGIC + SAFE HANDLING)
+# 🤖 GEMINI
 def ask_gemini(prompt, image=None):
 
     keys = [k for k in API_KEYS if k]
@@ -224,7 +221,7 @@ def ask_openai(prompt):
     except:
         return "⚠️ All AI Teachers busy beta 😄"
 
-# ⚙️ PROCESS ENGINE (CACHE FIX ADDED)
+# ⚙️ PROCESS
 def process(msg):
 
     if not allow(msg.user_id):
@@ -235,7 +232,17 @@ def process(msg):
     if cache_key in cache:
         return cache[cache_key]
 
-    prompt = build_prompt(msg.message)
+    # 🧠 Adaptive level
+    level = student_memory.get(msg.user_id, "medium")
+
+    if len(msg.message) < 15:
+        level = "weak"
+    elif len(msg.message) > 80:
+        level = "strong"
+
+    student_memory[msg.user_id] = level
+
+    prompt = build_prompt(msg.message, level)
 
     reply = ask_gemini(prompt, msg.image)
 
@@ -246,7 +253,7 @@ def process(msg):
 
     return reply
 
-# 🚀 CHAT (ONLY IMAGE SUPPORT ADDED)
+# 🚀 CHAT
 @app.post("/chat")
 async def chat(
     message: str = Form(""),
@@ -257,10 +264,10 @@ async def chat(
     global processing
 
     if is_abusive(message):
-        return {"reply": "Language sudhar beta nahito gabbar aa jaega aur teri puri kundali khol dega sabke samne 😄", "difficulty": "easy"}
+        return {"reply": "Language sudhar beta nahito gabbar teri puri kundali khol dega sabke samne 😄", "difficulty": "easy"}
 
-    # ✅ IMAGE FIX
     img_base64 = None
+
     if image:
         contents = await image.read()
         img_base64 = base64.b64encode(contents).decode("utf-8")
@@ -288,24 +295,6 @@ async def chat(
     processing = False
 
     return {"reply": reply, "difficulty": diff}
-
-# 🔍 CHECK KEYS
-@app.get("/check-keys")
-def check_keys():
-    results = []
-    for i, key in enumerate(API_KEYS, 1):
-        if not key:
-            results.append({"key": i, "status": "❌ Missing"})
-            continue
-        try:
-            r = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={key}").json()
-            if "models" in r:
-                results.append({"key": i, "status": "✅ Working"})
-            else:
-                results.append({"key": i, "status": "⚠️ Issue"})
-        except Exception as e:
-            results.append({"key": i, "status": str(e)})
-    return {"keys": results}
 
 @app.get("/")
 def home():
