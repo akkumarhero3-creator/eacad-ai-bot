@@ -31,14 +31,14 @@ LAST_MODEL_FETCH = 0
 queue = deque()
 processing = False
 
-# 📩 REQUEST MODEL (KEPT SAME)
+# 📩 REQUEST MODEL
 class Message(BaseModel):
     message: str
     subject: str
     image: str = None
     user_id: str = "student1"
 
-# 🚫 RATE LIMIT
+# 🚫 RATE LIMIT (2 sec/user)
 def allow(user):
     now = time.time()
     if user in last_request and now - last_request[user] < 2:
@@ -51,7 +51,7 @@ def is_abusive(text):
     bad_words = ["idiot","stupid","fuck","shit","madarchod","chutiya","pagal"]
     return any(word in text.lower() for word in bad_words)
 
-# 🎯 DIFFICULTY
+# 🎯 DIFFICULTY DETECTION
 def detect_difficulty(q):
     if len(q) < 20:
         return "easy"
@@ -59,7 +59,7 @@ def detect_difficulty(q):
         return "medium"
     return "hard"
 
-# 🔥 FETCH MODELS (UNCHANGED)
+# 🔥 FETCH AVAILABLE MODELS
 def fetch_models(key):
     global AVAILABLE_MODELS, LAST_MODEL_FETCH
 
@@ -86,7 +86,7 @@ def fetch_models(key):
     except:
         return ["gemini-1.5-flash-latest"]
 
-# 🧠 PROMPT (MINOR SAFE IMPROVEMENT)
+# 🧠 PROMPT (UPGRADED FOR IMAGE + DIAGRAM UNDERSTANDING)
 def build_prompt(q):
     return f"""
 You are a top JEE/NEET teacher.
@@ -111,15 +111,41 @@ Teach like real teacher
 ### Final Answer
 Short crisp answer
 
+----------------------------------------
+
 If image is provided:
-- Read question (even handwritten)
-- Ignore noise/scribbles
-- Solve step-by-step
+
+1. Carefully read handwritten text (ignore noise/scribbles)
+2. Convert it into a clear question internally
+3. If diagram is present:
+   - Understand it properly (forces, circuit, rays, graph etc.)
+   - Use it in solving
+   - Explain in words (no drawing)
+
+4. If graph:
+   - Identify slope/intercept/area
+
+5. If physics diagram:
+   - Identify forces/directions/components
+
+6. If circuit:
+   - Identify connections and apply laws
+
+----------------------------------------
+
+Rules:
+- DO NOT say "image shows"
+- DO NOT output raw extracted text
+- Solve directly like a teacher
+- Use clean LaTeX like $F = ma$
+- Avoid \\vec, \\text
+
+----------------------------------------
 
 Question: {q}
 """
 
-# 🤖 GEMINI ENGINE (SAFE PATCH)
+# 🤖 GEMINI ENGINE (UNCHANGED LOGIC + SAFE HANDLING)
 def ask_gemini(prompt, image=None):
 
     keys = [k for k in API_KEYS if k]
@@ -172,7 +198,7 @@ def ask_gemini(prompt, image=None):
 
     return None
 
-# 🔁 OPENAI FALLBACK (UNCHANGED)
+# 🔁 OPENAI FALLBACK
 def ask_openai(prompt):
     key = os.getenv("OPENAI_API_KEY")
 
@@ -198,20 +224,20 @@ def ask_openai(prompt):
     except:
         return "⚠️ All AI Teachers busy beta 😄"
 
-# ⚙️ PROCESS (FIXED IMAGE + CACHE)
-def process(msg, image=None):
+# ⚙️ PROCESS ENGINE (CACHE FIX ADDED)
+def process(msg):
 
     if not allow(msg.user_id):
         return "⏳ Arre beta 😄 thoda ruk!"
 
-    cache_key = f"{msg.subject}:{msg.message}:{'img' if image else 'text'}"
+    cache_key = f"{msg.subject}:{msg.message}:{'img' if msg.image else 'text'}"
 
     if cache_key in cache:
         return cache[cache_key]
 
     prompt = build_prompt(msg.message)
 
-    reply = ask_gemini(prompt, image)
+    reply = ask_gemini(prompt, msg.image)
 
     if not reply:
         reply = ask_openai(prompt)
@@ -220,7 +246,7 @@ def process(msg, image=None):
 
     return reply
 
-# 🚀 CHAT (ONLY IMAGE FIX ADDED)
+# 🚀 CHAT (ONLY IMAGE SUPPORT ADDED)
 @app.post("/chat")
 async def chat(
     message: str = Form(""),
@@ -231,7 +257,7 @@ async def chat(
     global processing
 
     if is_abusive(message):
-        return {"reply": "Language sudhar beta , nahito teri puri kundali khol dunga E Acad mentors ke samne😄", "difficulty": "easy"}
+        return {"reply": "Language sudhar beta nahito gabbar aa jaega aur teri puri kundali khol dega sabke samne 😄", "difficulty": "easy"}
 
     # ✅ IMAGE FIX
     img_base64 = None
@@ -239,7 +265,12 @@ async def chat(
         contents = await image.read()
         img_base64 = base64.b64encode(contents).decode("utf-8")
 
-    msg = Message(message=message, subject=subject, user_id=user_id)
+    msg = Message(
+        message=message,
+        subject=subject,
+        image=img_base64,
+        user_id=user_id
+    )
 
     queue.append(msg)
 
@@ -252,13 +283,30 @@ async def chat(
 
     diff = detect_difficulty(current.message)
 
-    reply = process(current, img_base64)
+    reply = process(current)
 
     processing = False
 
     return {"reply": reply, "difficulty": diff}
 
-# HEALTH
+# 🔍 CHECK KEYS
+@app.get("/check-keys")
+def check_keys():
+    results = []
+    for i, key in enumerate(API_KEYS, 1):
+        if not key:
+            results.append({"key": i, "status": "❌ Missing"})
+            continue
+        try:
+            r = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={key}").json()
+            if "models" in r:
+                results.append({"key": i, "status": "✅ Working"})
+            else:
+                results.append({"key": i, "status": "⚠️ Issue"})
+        except Exception as e:
+            results.append({"key": i, "status": str(e)})
+    return {"keys": results}
+
 @app.get("/")
 def home():
     return {"status": "E Acad AI Running 🚀"}
